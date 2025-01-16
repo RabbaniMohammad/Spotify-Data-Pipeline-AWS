@@ -1,0 +1,104 @@
+{
+  "Comment": "Step Function to orchestrate Glue Job and Crawler with failure notifications",
+  "StartAt": "StartGlueJob",
+  "QueryLanguage": "JSONPath",
+  "States": {
+    "StartGlueJob": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::glue:startJobRun.sync",
+      "Parameters": {
+        "JobName": "spotify data"
+      },
+      "Catch": [
+        {
+          "ErrorEquals": ["States.ALL"],
+          "Next": "SendJobFailedNotification"
+        }
+      ],
+      "Next": "StartGlueCrawler"
+    },
+    "StartGlueCrawler": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::aws-sdk:glue:startCrawler",
+      "Parameters": {
+        "Name": "ndl_"
+      },
+      "Catch": [
+        {
+          "ErrorEquals": ["States.ALL"],
+          "Next": "SendCrawlerFailedNotification"
+        }
+      ],
+      "Next": "WaitForCrawlerCompletion"
+    },
+    "WaitForCrawlerCompletion": {
+      "Type": "Wait",
+      "Seconds": 30,
+      "Next": "CheckCrawlerStatus"
+    },
+    "CheckCrawlerStatus": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::aws-sdk:glue:getCrawler",
+      "Parameters": {
+        "Name": "ndl_"
+      },
+      "ResultPath": "$.CrawlerInfo",
+      "Catch": [
+        {
+          "ErrorEquals": ["States.ALL"],
+          "Next": "SendCrawlerFailedNotification"
+        }
+      ],
+      "Next": "IsCrawlerRunning"
+    },
+    "IsCrawlerRunning": {
+      "Type": "Choice",
+      "Choices": [
+        {
+          "Variable": "$.CrawlerInfo.Crawler.State",
+          "StringEquals": "READY",
+          "Next": "SendSuccessNotification"
+        }
+      ],
+      "Default": "WaitForCrawlerCompletion"
+    },
+    "SendJobFailedNotification": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::aws-sdk:sns:publish",
+      "Parameters": {
+        "TopicArn": "arn:aws:sns:us-east-2:156041412518:dec24sms",
+        "Message": "The Glue ETL Job 'spotify data' has failed.",
+        "Subject": "Glue ETL Job Failure Notification"
+      },
+      "Next": "FailState"
+    },
+    "SendCrawlerFailedNotification": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::aws-sdk:sns:publish",
+      "Parameters": {
+        "TopicArn": "arn:aws:sns:us-east-2:156041412518:dec24sms",
+        "Message": "The Glue Crawler 'ndl_' has failed.",
+        "Subject": "Glue Crawler Failure Notification"
+      },
+      "Next": "FailState"
+    },
+    "SendSuccessNotification": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::aws-sdk:sns:publish",
+      "Parameters": {
+        "TopicArn": "arn:aws:sns:us-east-2:156041412518:dec24sms",
+        "Message": "Step Function completed successfully. Glue Crawler is ready.",
+        "Subject": "Step Function Success Notification"
+      },
+      "Next": "Success"
+    },
+    "FailState": {
+      "Type": "Fail",
+      "Error": "StepFunctionFailed",
+      "Cause": "One or more steps failed."
+    },
+    "Success": {
+      "Type": "Succeed"
+    }
+  }
+}
